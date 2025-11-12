@@ -1,0 +1,30 @@
+# Source files
+src/
+tsconfig.json
+.eslintrc.js
+.prettierrc
+
+# Tests
+**/*.spec.ts
+**/*.test.ts
+jest.config.js
+coverage/
+
+# Development
+.kiro/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# CI/CD
+.github/
+
+# Documentation (keep README.md)
+docs/
+
+# Misc
+.DS_Store
+*.log
+.env
+.env.*
