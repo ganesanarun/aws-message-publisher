@@ -32,7 +32,7 @@ class MockEnricher implements MessageEnricher {
 jest.mock('@aws-sdk/client-sqs');
 
 describe('SqsMessagePublisher', () => {
-  let publisher: SqsMessagePublisher;
+  let publisher: SqsMessagePublisher<any>;
   let mockSqsClient: jest.Mocked<SQSClient>;
   let mockSend: jest.Mock;
 

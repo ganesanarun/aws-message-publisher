@@ -18,7 +18,7 @@ import { NoOpLogger } from '../logging/no-op-logger';
  * SQS message publisher implementation.
  * Publishes messages to AWS SQS queues with support for enrichment, serialization, and batch operations.
  */
-export class SqsMessagePublisher<T = any> implements MessagePublisher<T> {
+export class SqsMessagePublisher<T> implements MessagePublisher<T> {
   private config?: SqsPublisherConfig;
   private enrichmentPipeline?: EnrichmentPipeline;
   private resolvedQueueUrl?: string;

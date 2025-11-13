@@ -32,7 +32,7 @@ class MockEnricher implements MessageEnricher {
 jest.mock('@aws-sdk/client-sns');
 
 describe('SnsMessagePublisher', () => {
-  let publisher: SnsMessagePublisher;
+  let publisher: SnsMessagePublisher<any>;
   let mockSnsClient: jest.Mocked<SNSClient>;
   let mockSend: jest.Mock;
 
@@ -294,9 +294,7 @@ describe('SnsMessagePublisher', () => {
 
     it('should throw PublishError on AWS SDK error', async () => {
       mockSend.mockRejectedValue(new Error('AWS SDK Error'));
-
       publisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:test-topic'));
-
       const message = { id: 1, data: 'test' };
 
       await expect(publisher.publish(message)).rejects.toThrow(PublishError);
@@ -317,15 +315,14 @@ describe('SnsMessagePublisher', () => {
         }),
         getPriority: jest.fn().mockReturnValue(10),
       };
-
       publisher.configure(config =>
         config
           .topicArn('arn:aws:sns:us-east-1:123456789:test-topic')
           .contextResolver(mockContextResolver)
           .enrichers([mockEnricher])
       );
-
       const message = { id: 1, data: 'test' };
+
       await publisher.publish(message);
 
       expect(mockContextResolver.resolve).toHaveBeenCalled();
@@ -351,7 +348,6 @@ describe('SnsMessagePublisher', () => {
 
     it('should publish all messages in batch', async () => {
       publisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:test-topic'));
-
       const messages = [
         { id: 1, data: 'test1' },
         { id: 2, data: 'test2' },
@@ -370,7 +366,6 @@ describe('SnsMessagePublisher', () => {
 
     it('should chunk messages into batches of 10', async () => {
       publisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:test-topic'));
-
       const messages = Array.from({ length: 25 }, (_, i) => ({
         id: i,
         data: `test${i}`,
@@ -392,9 +387,7 @@ describe('SnsMessagePublisher', () => {
         }
         return Promise.resolve({ MessageId: `msg-${callCount}` });
       });
-
       publisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:test-topic'));
-
       const messages = [
         { id: 1, data: 'test1' },
         { id: 2, data: 'test2' },
@@ -423,9 +416,7 @@ describe('SnsMessagePublisher', () => {
         }
         return Promise.resolve({ MessageId: `msg-${callCount}` });
       });
-
       publisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:test-topic'));
-
       const messages = [
         { id: 1, data: 'test1' },
         { id: 2, data: 'test2' },
@@ -445,9 +436,7 @@ describe('SnsMessagePublisher', () => {
         .mockResolvedValueOnce({ MessageId: 'msg-1' })
         .mockRejectedValueOnce(new Error('Failed'))
         .mockResolvedValueOnce({ MessageId: 'msg-3' });
-
       publisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:test-topic'));
-
       const messages = [
         { id: 1, data: 'test1' },
         { id: 2, data: 'test2' },
@@ -466,7 +455,6 @@ describe('SnsMessagePublisher', () => {
 
     it('should process large batches efficiently', async () => {
       publisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:test-topic'));
-
       const messages = Array.from({ length: 100 }, (_, i) => ({
         id: i,
         data: `test${i}`,
@@ -488,16 +476,13 @@ describe('SnsMessagePublisher', () => {
 
     it('should support union types for messages', async () => {
       mockSend.mockResolvedValue({ MessageId: 'test-id' });
-
       const typedPublisher = new SnsMessagePublisher<OrderEvent>(mockSnsClient);
       typedPublisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:orders'));
-
       const event1: OrderEvent = {
         type: 'ORDER_CREATED',
         orderId: '123',
         amount: 100,
       };
-
       const event2: OrderEvent = {
         type: 'ORDER_CANCELLED',
         orderId: '456',
@@ -512,10 +497,8 @@ describe('SnsMessagePublisher', () => {
 
     it('should support union types in batch publishing', async () => {
       mockSend.mockResolvedValue({ MessageId: 'test-id' });
-
       const typedPublisher = new SnsMessagePublisher<OrderEvent>(mockSnsClient);
       typedPublisher.configure(config => config.topicArn('arn:aws:sns:us-east-1:123456789:orders'));
-
       const events: OrderEvent[] = [
         { type: 'ORDER_CREATED', orderId: '123', amount: 100 },
         { type: 'ORDER_UPDATED', orderId: '456', changes: { status: 'shipped' } },
@@ -531,14 +514,13 @@ describe('SnsMessagePublisher', () => {
   describe('integration with real enrichers', () => {
     it('should work with MockEnricher', async () => {
       mockSend.mockResolvedValue({ MessageId: 'test-id' });
-
       publisher.configure(config =>
         config
           .topicArn('arn:aws:sns:us-east-1:123456789:test-topic')
           .enrichers([new MockEnricher()])
       );
-
       const message = { id: 1, data: 'test' };
+
       await publisher.publish(message);
 
       expect(mockSend).toHaveBeenCalledTimes(1);
@@ -547,14 +529,13 @@ describe('SnsMessagePublisher', () => {
 
     it('should work with multiple enrichers in priority order', async () => {
       mockSend.mockResolvedValue({ MessageId: 'test-id' });
-
       publisher.configure(config =>
         config
           .topicArn('arn:aws:sns:us-east-1:123456789:test-topic')
           .enrichers([new MockEnricher(), new TimestampEnricher()])
       );
-
       const message = { id: 1, data: 'test' };
+
       await publisher.publish(message);
 
       expect(mockSend).toHaveBeenCalledTimes(1);

@@ -18,7 +18,7 @@ import { NoOpLogger } from '../logging/no-op-logger';
  * SNS message publisher implementation.
  * Publishes messages to AWS SNS topics with support for enrichment, serialization, and batch operations.
  */
-export class SnsMessagePublisher<T = any> implements MessagePublisher<T> {
+export class SnsMessagePublisher<T> implements MessagePublisher<T> {
   private config?: SnsPublisherConfig;
   private enrichmentPipeline?: EnrichmentPipeline;
   private resolvedTopicArn?: string;
