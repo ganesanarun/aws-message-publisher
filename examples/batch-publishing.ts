@@ -13,11 +13,7 @@ import { SQSClient } from '@aws-sdk/client-sqs';
 //   TraceEnricher,
 //   TimestampEnricher,
 // } from '@snow-tzu/aws-message-publisher';
-import {
-  SnsMessagePublisher,
-  SqsMessagePublisher,
-  TimestampEnricher,
-} from '../src';
+import { SnsMessagePublisher, SqsMessagePublisher, TimestampEnricher } from '../src';
 
 // Define message types
 interface UserEvent {
@@ -50,9 +46,7 @@ async function batchPublishToSns() {
 
   const publisher = new SnsMessagePublisher<UserEvent>(snsClient);
   publisher.configure(config =>
-    config
-      .topicArn('test-custom-events')
-      .addEnricher(new TimestampEnricher())
+    config.topicArn('test-custom-events').addEnricher(new TimestampEnricher())
   );
 
   // Create a batch of user events
@@ -107,11 +101,7 @@ async function batchPublishToSqs() {
   });
 
   const publisher = new SqsMessagePublisher<LogEntry>(sqsClient);
-  publisher.configure(config =>
-    config.queueUrl(
-      'dummy-queue'
-    )
-  );
+  publisher.configure(config => config.queueUrl('dummy-queue'));
 
   // Create a batch of log entries
   const logEntries: LogEntry[] = [
@@ -164,9 +154,7 @@ async function largeBatchPublish() {
   });
 
   const publisher = new SnsMessagePublisher<UserEvent>(snsClient);
-  publisher.configure(config =>
-    config.topicArn('test-custom-events')
-  );
+  publisher.configure(config => config.topicArn('test-custom-events'));
 
   // Create a large batch (more than AWS limit of 10)
   const largeUserBatch: UserEvent[] = Array.from({ length: 25 }, (_, i) => ({
@@ -210,9 +198,7 @@ async function handlePartialFailures() {
   });
 
   const publisher = new SnsMessagePublisher<UserEvent>(snsClient);
-  publisher.configure(config =>
-    config.topicArn('test-custom-events')
-  );
+  publisher.configure(config => config.topicArn('test-custom-events'));
 
   const messages: UserEvent[] = [
     { userId: 'user-001', action: 'created', email: 'user1@example.com', timestamp: new Date() },

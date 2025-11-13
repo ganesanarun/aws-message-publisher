@@ -13,11 +13,7 @@ import { SQSClient } from '@aws-sdk/client-sqs';
 //   SqsMessagePublisher,
 //   MessagePublisher,
 // } from '@snow-tzu/aws-message-publisher';
-import {
-  SnsMessagePublisher,
-  SqsMessagePublisher,
-  MessagePublisher,
-} from '../src';
+import { SnsMessagePublisher, SqsMessagePublisher, MessagePublisher } from '../src';
 
 // Define message types
 interface OrderEvent {
@@ -132,7 +128,12 @@ export class InventoryService {
       },
     },
   ],
-  exports: ['ACCOUNT_A_SNS_CLIENT', 'ACCOUNT_A_SQS_CLIENT', 'ACCOUNT_B_SNS_CLIENT', 'ACCOUNT_C_SQS_CLIENT'],
+  exports: [
+    'ACCOUNT_A_SNS_CLIENT',
+    'ACCOUNT_A_SQS_CLIENT',
+    'ACCOUNT_B_SNS_CLIENT',
+    'ACCOUNT_C_SQS_CLIENT',
+  ],
 })
 export class AwsConfigModule {}
 
@@ -148,9 +149,7 @@ export class AwsConfigModule {}
       provide: 'ORDER_PUBLISHER_US',
       useFactory: (snsClient: SNSClient) => {
         const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
-        publisher.configure(config =>
-          config.topicArn('test-custom-events')
-        );
+        publisher.configure(config => config.topicArn('test-custom-events'));
         return publisher;
       },
       inject: ['ACCOUNT_A_SNS_CLIENT'],
@@ -216,7 +215,6 @@ export class InventoryModule {}
  * Order Service
  * Uses multiple publishers based on a customer region
  */
-
 
 /**
  * Example usage (standalone script)
