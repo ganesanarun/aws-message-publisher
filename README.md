@@ -17,37 +17,30 @@ Production-ready, framework-agnostic TypeScript package for publishing messages 
 
 ## Table of Contents
 
-- [Installation](#installation)
 - [Requirements](#requirements)
+- [Installation](#installation)
 - [Quick Start](#quick-start)
   - [Standalone SNS Publisher](#standalone-sns-publisher)
   - [Standalone SQS Publisher](#standalone-sqs-publisher)
-- [Topic Names vs ARNs / Queue Names vs URLs](#topic-names-vs-arns--queue-names-vs-urls)
+- [Configuration](#configuration)
+  - [Topic Names vs ARNs / Queue Names vs URLs](#topic-names-vs-arns--queue-names-vs-urls)
+  - [Environment Variables](#environment-variables)
 - [Framework Integration](#framework-integration)
   - [NestJS Integration](#nestjs-integration)
   - [Express Integration](#express-integration)
-- [Message Enrichment](#message-enrichment)
-  - [Built-in Enrichers](#built-in-enrichers)
-  - [Custom Enrichers](#custom-enrichers)
-  - [Enricher Configuration](#enricher-configuration)
-- [Custom Serialization](#custom-serialization)
-- [Batch Publishing](#batch-publishing)
+- [Advanced Features](#advanced-features)
+  - [Message Enrichment](#message-enrichment)
+  - [Logging](#logging)
+  - [Custom Serialization](#custom-serialization)
+  - [Batch Publishing](#batch-publishing)
 - [API Reference](#api-reference)
 - [Troubleshooting](#troubleshooting)
 - [Examples](#examples)
+- [Compatibility](#compatibility)
+- [Contributing](#contributing)
 - [License](#license)
-
-## Installation
-
-```bash
-yarn add @snow-tzu/aws-message-publisher
-```
-
-Or with npm:
-
-```bash
-npm install @snow-tzu/aws-message-publisher
-```
+- [Related Packages](#related-packages)
+- [Support](#support)
 
 ## Requirements
 
@@ -61,6 +54,18 @@ The package is framework-agnostic and works with:
 - Express
 - Fastify
 - Any other Node.js framework
+
+## Installation
+
+```bash
+yarn add @snow-tzu/aws-message-publisher
+```
+
+Or with npm:
+
+```bash
+npm install @snow-tzu/aws-message-publisher
+```
 
 ## Quick Start
 
@@ -141,11 +146,13 @@ publisher.configure(config => config
 
 > **💡 Tip:** Using queue names is simpler and more portable across environments. The package automatically resolves names to full URLs using your AWS client configuration.
 
-## Topic Names vs ARNs / Queue Names vs URLs
+## Configuration
+
+### Topic Names vs ARNs / Queue Names vs URLs
 
 The package supports both simple names and full ARNs/URLs for configuration. **We strongly recommend using simple names** for better portability and cleaner code.
 
-### Why Use Names?
+#### Why Use Names?
 
 **Benefits of using topic/queue names:**
 - ✅ **Simpler configuration** - No need to manage long ARN/URL strings
@@ -154,7 +161,7 @@ The package supports both simple names and full ARNs/URLs for configuration. **W
 - ✅ **Less error-prone** - No risk of typos in long ARN/URL strings
 - ✅ **Automatic resolution** - Package handles ARN/URL resolution using your AWS client config
 
-### Examples
+#### Examples
 
 **SNS - Using Topic Names (Recommended):**
 ```typescript
@@ -174,7 +181,7 @@ publisher.configure(config => config.queueName('order-queue'));
 publisher.configure(config => config.queueUrl('https://sqs.us-east-1.amazonaws.com/123456789/order-queue'));
 ```
 
-### When to Use Full ARNs/URLs
+#### When to Use Full ARNs/URLs
 
 Use full ARNs/URLs only when:
 - Working with cross-account resources
@@ -402,13 +409,15 @@ router.post('/orders', async (req, res) => {
 });
 ```
 
-## Message Enrichment
+## Advanced Features
+
+### Message Enrichment
 
 Enrichers automatically add metadata attributes to messages before publishing. The package includes a timestamp enricher and provides interfaces for implementing custom enrichers.
 
-### Built-in Enrichers
+#### Built-in Enrichers
 
-#### TimestampEnricher
+##### TimestampEnricher
 
 Adds a timestamp to every published message:
 
@@ -443,11 +452,11 @@ const enricher = new TimestampEnricher(
 );
 ```
 
-### Custom Enrichers
+#### Custom Enrichers
 
 Create custom enrichers by implementing the `MessageEnricher` interface. This is useful for adding trace IDs, correlation IDs, user context, environment tags, or any application-specific metadata.
 
-#### Example: Trace ID Enricher
+##### Example: Trace ID Enricher
 
 ```typescript
 import { MessageEnricher, MessageAttributes, PublishContext } from '@snow-tzu/aws-message-publisher';
@@ -483,7 +492,7 @@ publisher.configure(config => config
 );
 ```
 
-#### Example: Correlation ID Enricher
+##### Example: Correlation ID Enricher
 
 ```typescript
 class CorrelationEnricher implements MessageEnricher {
@@ -510,7 +519,7 @@ class CorrelationEnricher implements MessageEnricher {
 }
 ```
 
-#### Example: Environment Enricher
+##### Example: Environment Enricher
 
 ```typescript
 class EnvironmentEnricher implements MessageEnricher {
@@ -533,7 +542,7 @@ class EnvironmentEnricher implements MessageEnricher {
 }
 ```
 
-#### Example: User Context Enricher
+##### Example: User Context Enricher
 
 ```typescript
 class UserContextEnricher implements MessageEnricher {
@@ -556,9 +565,9 @@ class UserContextEnricher implements MessageEnricher {
 }
 ```
 
-### Enricher Configuration
+#### Enricher Configuration
 
-#### Adding Multiple Enrichers
+##### Adding Multiple Enrichers
 
 ```typescript
 publisher.configure(config => config
@@ -581,7 +590,7 @@ publisher.configure(config => config
 );
 ```
 
-#### Enricher Execution Order
+##### Enricher Execution Order
 
 Enrichers execute in priority order (lower numbers first). If enrichers have the same priority, they execute in the order they were added.
 
@@ -595,7 +604,7 @@ publisher.configure(config => config
 );
 ```
 
-#### Attribute Conflicts
+##### Attribute Conflicts
 
 If multiple enrichers produce the same attribute key, the last enricher in execution order wins:
 
@@ -608,7 +617,7 @@ publisher.configure(config => config
 );
 ```
 
-#### Passing Context to Enrichers
+##### Passing Context to Enrichers
 
 Enrichers receive a `PublishContext` object that can contain runtime information:
 
@@ -627,19 +636,125 @@ await publisher.publish(
 // and pass context through your application layer
 ```
 
-## Custom Serialization
+### Logging
+
+The publisher supports configurable logging, allowing you to pass your already-configured logger (Winston, Pino, console, NestJS Logger, etc.) directly. The publisher emits structured log messages that your logging framework formats according to its configuration (JSON, pretty print, OpenTelemetry, etc.).
+
+#### Logging Quick Start
+
+##### Using Console Logger
+
+The simplest way to enable logging is to pass the built-in console object:
+
+```typescript
+import { SnsMessagePublisher } from '@snow-tzu/aws-message-publisher';
+
+const publisher = new SnsMessagePublisher(snsClient);
+publisher.configure(config => config
+  .topicName('my-topic')
+  .logger(console)
+);
+
+// Logs will appear in console output
+await publisher.publish({ orderId: '123', status: 'created' });
+// Output: Publishing message { destination: 'arn:aws:sns:...', messageType: 'Object' }
+// Output: Message published successfully { messageId: 'abc-123', destination: 'arn:aws:sns:...', duration: 45 }
+```
+
+##### Logger Interface
+
+The publisher uses a minimal logger interface compatible with most logging frameworks:
+
+```typescript
+interface Logger {
+  debug(message: string, context?: Record<string, any>): void;
+  info(message: string, context?: Record<string, any>): void;
+  warn(message: string, context?: Record<string, any>): void;
+  error(message: string, context?: Record<string, any>): void;
+}
+```
+
+Any object with these four methods can be used as a logger. The publisher never formats logs - it passes a message string and context object to your logger, which handles all formatting.
+
+Check out [examples](./examples)
+
+##### Static Context
+
+Add static context fields that appear in all log messages:
+
+```typescript
+publisher.configure(config => config
+  .topicName('my-topic')
+  .logger(console)
+  .logContext({
+    service: 'order-service',
+    environment: 'production',
+    version: '1.0.0'
+  })
+);
+
+// All logs will include these fields:
+// Publishing message { destination: 'arn:...', messageType: 'Object', service: 'order-service', environment: 'production', version: '1.0.0' }
+```
+
+Static context is merged with per-message context, with per-message context taking precedence if there are conflicts.
+
+##### Framework Compatibility
+
+The logger interface is compatible with most popular logging frameworks:
+
+**Works directly (no adapter needed):**
+- ✅ **console** - Built-in Node.js console
+- ✅ **Winston** - `winston.createLogger()`
+- ✅ **Pino** - `pino()`
+- ✅ **Bunyan** - `bunyan.createLogger()`
+- ✅ **Log4js** - `log4js.getLogger()`
+
+**Requires simple adapter:**
+- 🔧 **NestJS Logger** - Uses `log()` instead of `info()` (see [NestJS Logger example](./examples/logging-nestjs.ts))
+
+If your logging framework has different method signatures, create a simple adapter:
+
+```typescript
+// Example: Logger with different method signatures
+const customLogger = {
+  debug: (msg: string, context?: any) => myLogger.logDebug(msg, context),
+  info: (msg: string, context?: any) => myLogger.logInfo(msg, context),
+  warn: (msg: string, context?: any) => myLogger.logWarn(msg, context),
+  error: (msg: string, context?: any) => myLogger.logError(msg, context)
+};
+
+publisher.configure(config => config.logger(customLogger));
+```
+
+##### No Logging by Default
+
+If no logger is configured, the publisher operates silently with zero overhead:
+
+```typescript
+// No logger configured - no logs emitted
+const publisher = new SnsMessagePublisher(snsClient);
+publisher.configure(config => config.topicName('my-topic'));
+
+await publisher.publish({ orderId: '123' });
+// No output - silent operation
+```
+
+This ensures logging is opt-in and doesn't impact performance when not needed.
+
+### Custom Serialization
 
 By default, messages are serialized to JSON using the built-in `JsonMessageSerializer`. You can implement custom serializers for other formats like XML, CSV, Protobuf, or any proprietary format.
 
-### Built-in Serializers
+#### Built-in Serializers
 
 - **JsonMessageSerializer**: Default JSON serialization (automatically used if no serializer is specified)
 
-### Implementing Custom Serializers
+#### Implementing Custom Serializers
 
 Create custom serializers by implementing the `MessageSerializer` interface:
 
-#### Example: XML Serializer
+##### Example: XML Serializer
 
 ```typescript
 import { MessageSerializer, SerializedMessage, SerializationError } from '@snow-tzu/aws-message-publisher';
@@ -678,7 +793,7 @@ publisher.configure(config => config
 );
 ```
 
-#### Example: CSV Serializer
+##### Example: CSV Serializer
 
 ```typescript
 class CsvMessageSerializer implements MessageSerializer {
@@ -704,7 +819,7 @@ class CsvMessageSerializer implements MessageSerializer {
 }
 ```
 
-#### Example: Protobuf Serializer
+##### Example: Protobuf Serializer
 
 ```typescript
 import { MessageSerializer, SerializedMessage, SerializationError } from '@snow-tzu/aws-message-publisher';
@@ -739,7 +854,7 @@ publisher.configure(config => config
 );
 ```
 
-### Using Custom Serializers
+#### Using Custom Serializers
 
 ```typescript
 // Configure with custom serializer
@@ -756,7 +871,7 @@ await publisher.publish({
 });
 ```
 
-### Serializer Best Practices
+#### Serializer Best Practices
 
 1. **Error Handling**: Always wrap serialization logic in try-catch and throw `SerializationError`
 2. **Content Type**: Return accurate content type for proper message handling
@@ -764,7 +879,7 @@ await publisher.publish({
 4. **Testing**: Test serialization with various message types and edge cases
 5. **Performance**: Consider serialization performance for high-throughput scenarios
 
-## Batch Publishing
+### Batch Publishing
 
 Publish multiple messages efficiently:
 
@@ -1351,13 +1466,13 @@ const snsClient = new SNSClient({ region: 'us-east-1' });
    'my-topic'
    
    // SNS - Full ARN (alternative)
-   'arn:aws:sns:us-east-1:123456789:my-topic'
+   'arn:aws:sns:us-east-1:123:my-topic'
    
    // SQS - Queue name (recommended, will be resolved)
    'my-queue'
    
    // SQS - Full URL (alternative)
-   'https://sqs.us-east-1.amazonaws.com/123456789/my-queue'
+   'https://sqs.us-east-1.amazonaws.com/123/my-queue'
    ```
 
 #### 5. Serialization Errors
@@ -1642,22 +1757,6 @@ console.log('Batch publish:', {
    );
    ```
 
-### Getting Help
-
-If you're still experiencing issues:
-
-1. **Check Examples:** Review the [examples directory](./examples) for working code samples
-2. **API Reference:** Consult the [API reference](#api-reference) for detailed documentation
-3. **GitHub Issues:** Search existing issues or open a new one at [GitHub Issues](https://github.com/snow-tzu/aws-message-publisher/issues)
-4. **AWS Documentation:** Review [AWS SNS](https://docs.aws.amazon.com/sns/) and [AWS SQS](https://docs.aws.amazon.com/sqs/) documentation
-
-When reporting issues, please include:
-- Package version
-- Node.js version
-- Error messages and stack traces
-- Minimal code example to reproduce the issue
-- AWS SDK version
-
 ## Examples
 
 See the [examples directory](./examples) for complete working examples:
@@ -1781,7 +1880,7 @@ yarn test:coverage
 
 ## License
 
-MIT © Snow Tzu
+MIT © Ganesan
 
 ## Related Packages
 
@@ -1795,4 +1894,4 @@ MIT © Snow Tzu
 
 ---
 
-Made with ❤️ by Snow Tzu
+Made with ❤️ by Ganesan

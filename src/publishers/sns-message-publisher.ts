@@ -1,5 +1,5 @@
 import { CreateTopicCommand, PublishCommand, SNSClient } from '@aws-sdk/client-sns';
-import { MessagePublisher } from '../interfaces';
+import { Logger, MessagePublisher } from '../interfaces';
 import {
   BatchPublishOptions,
   BatchPublishResult,
@@ -12,6 +12,7 @@ import {
 import { SnsPublisherConfig, SnsPublisherConfiguration } from '../configuration';
 import { EnrichmentPipeline } from '../pipeline';
 import { ConfigurationError, PublishError } from '../errors';
+import { NoOpLogger } from '../logging/no-op-logger';
 
 /**
  * SNS message publisher implementation.
@@ -21,6 +22,7 @@ export class SnsMessagePublisher<T = any> implements MessagePublisher<T> {
   private config?: SnsPublisherConfig;
   private enrichmentPipeline?: EnrichmentPipeline;
   private resolvedTopicArn?: string;
+  private logger: Logger = new NoOpLogger();
 
   /**
    * Create a new SNS message publisher.
@@ -68,18 +70,38 @@ export class SnsMessagePublisher<T = any> implements MessagePublisher<T> {
   async publish(message: T, options?: PublishOptions): Promise<PublishResult> {
     this.ensureConfigured();
 
+    const startTime = Date.now();
+    let topicArn: string | undefined;
+
     try {
       // 1. Resolve topic ARN
-      const topicArn = await this.resolveTopicArn();
+      topicArn = await this.resolveTopicArn();
+
+      // Log start of publishing
+      this.logger.debug('Publishing message', {
+        destination: topicArn,
+        messageType: message?.constructor?.name || typeof message,
+      });
 
       // 2. Resolve context
       const context = await this.resolveContext();
 
       // 3. Enrich message
+      if (this.enrichmentPipeline && this.config!.enrichers && this.config!.enrichers.length > 0) {
+        this.logger.debug('Applying enrichers', {
+          enricherCount: this.config!.enrichers.length,
+          enricherNames: this.config!.enrichers.map(e => e.constructor.name),
+        });
+      }
       const attributes = await this.enrichMessage(message, context, options?.messageAttributes);
 
       // 4. Serialize message
+      const serializerType = this.config!.serializer!.constructor.name;
       const serialized = await this.config!.serializer!.serialize(message);
+      this.logger.debug('Serializing message', {
+        serializerType,
+        contentType: serialized.contentType,
+      });
 
       // 5. Add content type to attributes
       const finalAttributes = this.addContentTypeAttribute(attributes, serialized.contentType);
@@ -96,6 +118,13 @@ export class SnsMessagePublisher<T = any> implements MessagePublisher<T> {
 
       const response = await this.snsClient.send(command);
 
+      const duration = Date.now() - startTime;
+      this.logger.info('Message published successfully', {
+        messageId: response.MessageId!,
+        destination: topicArn,
+        duration,
+      });
+
       return {
         messageId: response.MessageId!,
         sequenceNumber: response.SequenceNumber,
@@ -103,6 +132,21 @@ export class SnsMessagePublisher<T = any> implements MessagePublisher<T> {
         timestamp: new Date(),
       };
     } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error('Failed to publish message', {
+        error:
+          error instanceof Error
+            ? {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+              }
+            : String(error),
+        destination: topicArn || this.config?.destination || 'unknown',
+        messageType: message?.constructor?.name || typeof message,
+        duration,
+      });
+
       if (error instanceof PublishError || error instanceof ConfigurationError) {
         throw error;
       }
@@ -126,60 +170,105 @@ export class SnsMessagePublisher<T = any> implements MessagePublisher<T> {
   async publishBatch(messages: T[], options?: BatchPublishOptions): Promise<BatchPublishResult> {
     this.ensureConfigured();
 
-    const successful: PublishResult[] = [];
-    const failed: FailedPublish[] = [];
-    const continueOnError = options?.continueOnError ?? true;
+    const startTime = Date.now();
+    const topicArn = await this.resolveTopicArn();
 
-    // SNS doesn't have a native batch API, so we publish messages individually
-    // but we can do them concurrently in chunks of 10 for better performance
-    const chunkSize = 10;
-    const chunks: T[][] = [];
+    this.logger.debug('Publishing batch', {
+      batchSize: messages.length,
+      destination: topicArn,
+    });
 
-    for (let i = 0; i < messages.length; i += chunkSize) {
-      chunks.push(messages.slice(i, i + chunkSize));
-    }
+    try {
+      const successful: PublishResult[] = [];
+      const failed: FailedPublish[] = [];
+      const continueOnError = options?.continueOnError ?? true;
 
-    for (const chunk of chunks) {
-      const promises = chunk.map((message, indexInChunk) => {
-        const originalIndex = chunks.indexOf(chunk) * chunkSize + indexInChunk;
-        return this.publish(message, options)
-          .then(result => ({ success: true, result, message, index: originalIndex }))
-          .catch(error => ({ success: false, error, message, index: originalIndex }));
-      });
+      // SNS doesn't have a native batch API, so we publish messages individually
+      // but we can do them concurrently in chunks of 10 for better performance
+      const chunkSize = 10;
+      const chunks: T[][] = [];
 
-      const results = await Promise.all(promises);
+      for (let i = 0; i < messages.length; i += chunkSize) {
+        chunks.push(messages.slice(i, i + chunkSize));
+      }
 
-      for (const result of results) {
-        if (result.success && 'result' in result) {
-          successful.push(result.result);
-        } else if (!result.success && 'error' in result) {
-          failed.push({
-            message: result.message,
-            error: result.error,
-            index: result.index,
-          });
+      for (const chunk of chunks) {
+        const promises = chunk.map((message, indexInChunk) => {
+          const originalIndex = chunks.indexOf(chunk) * chunkSize + indexInChunk;
+          return this.publish(message, options)
+            .then(result => ({ success: true, result, message, index: originalIndex }))
+            .catch(error => ({ success: false, error, message, index: originalIndex }));
+        });
 
-          if (!continueOnError) {
-            // Return early if we should stop on first error
-            return {
-              successful,
-              failed,
-              totalCount: messages.length,
-              successCount: successful.length,
-              failureCount: failed.length,
-            };
+        const results = await Promise.all(promises);
+
+        for (const result of results) {
+          if (result.success && 'result' in result) {
+            successful.push(result.result);
+          } else if (!result.success && 'error' in result) {
+            failed.push({
+              message: result.message,
+              error: result.error,
+              index: result.index,
+            });
+
+            if (!continueOnError) {
+              // Return early if we should stop on first error
+              const duration = Date.now() - startTime;
+              this.logger.info('Batch published', {
+                successCount: successful.length,
+                failureCount: failed.length,
+                totalCount: messages.length,
+                destination: topicArn,
+                duration,
+              });
+
+              return {
+                successful,
+                failed,
+                totalCount: messages.length,
+                successCount: successful.length,
+                failureCount: failed.length,
+              };
+            }
           }
         }
       }
-    }
 
-    return {
-      successful,
-      failed,
-      totalCount: messages.length,
-      successCount: successful.length,
-      failureCount: failed.length,
-    };
+      const duration = Date.now() - startTime;
+      this.logger.info('Batch published', {
+        successCount: successful.length,
+        failureCount: failed.length,
+        totalCount: messages.length,
+        destination: topicArn,
+        duration,
+      });
+
+      return {
+        successful,
+        failed,
+        totalCount: messages.length,
+        successCount: successful.length,
+        failureCount: failed.length,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error('Failed to publish batch', {
+        error:
+          error instanceof Error
+            ? {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+              }
+            : String(error),
+        destination: topicArn,
+        batchSize: messages.length,
+        duration,
+      });
+
+      throw error;
+    }
   }
 
   /**
@@ -328,6 +417,11 @@ export class SnsMessagePublisher<T = any> implements MessagePublisher<T> {
     // Create enrichment pipeline if enrichers are configured
     if (config.enrichers && config.enrichers.length > 0) {
       this.enrichmentPipeline = new EnrichmentPipeline(config.enrichers);
+    }
+
+    // Set logger from config (defaults to NoOpLogger if not configured)
+    if (config.logger) {
+      this.logger = config.logger;
     }
 
     // Reset resolved topic ARN when configuration changes

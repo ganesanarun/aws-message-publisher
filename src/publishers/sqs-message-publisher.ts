@@ -1,5 +1,5 @@
 import { GetQueueUrlCommand, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
-import { MessagePublisher } from '../interfaces';
+import { Logger, MessagePublisher } from '../interfaces';
 import {
   BatchPublishOptions,
   BatchPublishResult,
@@ -12,6 +12,7 @@ import {
 import { SqsPublisherConfig, SqsPublisherConfiguration } from '../configuration';
 import { EnrichmentPipeline } from '../pipeline';
 import { ConfigurationError, PublishError } from '../errors';
+import { NoOpLogger } from '../logging/no-op-logger';
 
 /**
  * SQS message publisher implementation.
@@ -21,6 +22,7 @@ export class SqsMessagePublisher<T = any> implements MessagePublisher<T> {
   private config?: SqsPublisherConfig;
   private enrichmentPipeline?: EnrichmentPipeline;
   private resolvedQueueUrl?: string;
+  private logger: Logger = new NoOpLogger();
 
   /**
    * Create a new SQS message publisher.
@@ -130,6 +132,11 @@ export class SqsMessagePublisher<T = any> implements MessagePublisher<T> {
       this.enrichmentPipeline = new EnrichmentPipeline(config.enrichers);
     }
 
+    // Set logger from config (defaults to NoOpLogger if not configured)
+    if (config.logger) {
+      this.logger = config.logger;
+    }
+
     // Reset resolved queue URL when configuration changes
     this.resolvedQueueUrl = undefined;
   }
@@ -160,23 +167,40 @@ export class SqsMessagePublisher<T = any> implements MessagePublisher<T> {
   async publish(message: T, options?: PublishOptions): Promise<PublishResult> {
     this.ensureConfigured();
 
-    try {
-      // 1. Resolve queue URL
-      const queueUrl = await this.resolveQueueUrl();
+    const startTime = Date.now();
+    const queueUrl = await this.resolveQueueUrl();
 
-      // 2. Resolve context
+    try {
+      // Log start of publishing
+      this.logger.debug('Publishing message', {
+        destination: queueUrl,
+        messageType: message?.constructor?.name || typeof message,
+      });
+
+      // 1. Resolve context
       const context = await this.resolveContext();
 
-      // 3. Enrich message
+      // 2. Enrich message
+      if (this.enrichmentPipeline) {
+        this.logger.debug('Applying enrichers', {
+          enricherCount: this.config!.enrichers!.length,
+          enricherNames: this.config!.enrichers!.map(e => e.constructor.name),
+        });
+      }
       const attributes = await this.enrichMessage(message, context, options?.messageAttributes);
 
-      // 4. Serialize message
+      // 3. Serialize message
+      const serializerType = this.config!.serializer!.constructor.name;
       const serialized = await this.config!.serializer!.serialize(message);
+      this.logger.debug('Serializing message', {
+        serializerType,
+        contentType: serialized.contentType,
+      });
 
-      // 5. Add content type to attributes
+      // 4. Add content type to attributes
       const finalAttributes = this.addContentTypeAttribute(attributes, serialized.contentType);
 
-      // 6. Publish to SQS
+      // 5. Publish to SQS
       const command = new SendMessageCommand({
         QueueUrl: queueUrl,
         MessageBody:
@@ -189,13 +213,39 @@ export class SqsMessagePublisher<T = any> implements MessagePublisher<T> {
 
       const response = await this.sqsClient.send(command);
 
-      return {
+      const result: PublishResult = {
         messageId: response.MessageId!,
         sequenceNumber: response.SequenceNumber,
         destination: queueUrl,
         timestamp: new Date(),
       };
+
+      // Log success
+      const duration = Date.now() - startTime;
+      this.logger.info('Message published successfully', {
+        messageId: result.messageId,
+        destination: queueUrl,
+        duration,
+      });
+
+      return result;
     } catch (error) {
+      // Log error
+      const duration = Date.now() - startTime;
+      this.logger.error('Failed to publish message', {
+        error:
+          error instanceof Error
+            ? {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+              }
+            : String(error),
+        destination: queueUrl,
+        messageType: message?.constructor?.name || typeof message,
+        duration,
+      });
+
       if (error instanceof PublishError || error instanceof ConfigurationError) {
         throw error;
       }
@@ -219,61 +269,106 @@ export class SqsMessagePublisher<T = any> implements MessagePublisher<T> {
   async publishBatch(messages: T[], options?: BatchPublishOptions): Promise<BatchPublishResult> {
     this.ensureConfigured();
 
-    const successful: PublishResult[] = [];
-    const failed: FailedPublish[] = [];
-    const continueOnError = options?.continueOnError ?? true;
+    const startTime = Date.now();
+    const queueUrl = await this.resolveQueueUrl();
 
-    // SQS has a native batch API (SendMessageBatchCommand) but for MVP
-    // we'll use the same approach as SNS: publish individually in chunks
-    // This keeps the implementation consistent and simpler
-    const chunkSize = 10;
-    const chunks: T[][] = [];
+    this.logger.debug('Publishing batch', {
+      batchSize: messages.length,
+      destination: queueUrl,
+    });
 
-    for (let i = 0; i < messages.length; i += chunkSize) {
-      chunks.push(messages.slice(i, i + chunkSize));
-    }
+    try {
+      const successful: PublishResult[] = [];
+      const failed: FailedPublish[] = [];
+      const continueOnError = options?.continueOnError ?? true;
 
-    for (const chunk of chunks) {
-      const promises = chunk.map((message, indexInChunk) => {
-        const originalIndex = chunks.indexOf(chunk) * chunkSize + indexInChunk;
-        return this.publish(message, options)
-          .then(result => ({ success: true, result, message, index: originalIndex }))
-          .catch(error => ({ success: false, error, message, index: originalIndex }));
-      });
+      // SQS has a native batch API (SendMessageBatchCommand) but for MVP
+      // we'll use the same approach as SNS: publish individually in chunks
+      // This keeps the implementation consistent and simpler
+      const chunkSize = 10;
+      const chunks: T[][] = [];
 
-      const results = await Promise.all(promises);
+      for (let i = 0; i < messages.length; i += chunkSize) {
+        chunks.push(messages.slice(i, i + chunkSize));
+      }
 
-      for (const result of results) {
-        if (result.success && 'result' in result) {
-          successful.push(result.result);
-        } else if (!result.success && 'error' in result) {
-          failed.push({
-            message: result.message,
-            error: result.error,
-            index: result.index,
-          });
+      for (const chunk of chunks) {
+        const promises = chunk.map((message, indexInChunk) => {
+          const originalIndex = chunks.indexOf(chunk) * chunkSize + indexInChunk;
+          return this.publish(message, options)
+            .then(result => ({ success: true, result, message, index: originalIndex }))
+            .catch(error => ({ success: false, error, message, index: originalIndex }));
+        });
 
-          if (!continueOnError) {
-            // Return early if we should stop on first error
-            return {
-              successful,
-              failed,
-              totalCount: messages.length,
-              successCount: successful.length,
-              failureCount: failed.length,
-            };
+        const results = await Promise.all(promises);
+
+        for (const result of results) {
+          if (result.success && 'result' in result) {
+            successful.push(result.result);
+          } else if (!result.success && 'error' in result) {
+            failed.push({
+              message: result.message,
+              error: result.error,
+              index: result.index,
+            });
+
+            if (!continueOnError) {
+              // Return early if we should stop on first error
+              const duration = Date.now() - startTime;
+              this.logger.info('Batch published', {
+                successCount: successful.length,
+                failureCount: failed.length,
+                totalCount: messages.length,
+                destination: queueUrl,
+                duration,
+              });
+
+              return {
+                successful,
+                failed,
+                totalCount: messages.length,
+                successCount: successful.length,
+                failureCount: failed.length,
+              };
+            }
           }
         }
       }
-    }
 
-    return {
-      successful,
-      failed,
-      totalCount: messages.length,
-      successCount: successful.length,
-      failureCount: failed.length,
-    };
+      const duration = Date.now() - startTime;
+      this.logger.info('Batch published', {
+        successCount: successful.length,
+        failureCount: failed.length,
+        totalCount: messages.length,
+        destination: queueUrl,
+        duration,
+      });
+
+      return {
+        successful,
+        failed,
+        totalCount: messages.length,
+        successCount: successful.length,
+        failureCount: failed.length,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error('Failed to publish batch', {
+        error:
+          error instanceof Error
+            ? {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+              }
+            : String(error),
+        destination: queueUrl,
+        batchSize: messages.length,
+        duration,
+      });
+
+      throw error;
+    }
   }
 
   /**

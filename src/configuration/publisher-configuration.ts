@@ -1,7 +1,9 @@
-import { ContextResolver, MessageEnricher, MessageSerializer } from '../interfaces';
-import { RetryPolicy } from '../types';
+import { ContextResolver, Logger, MessageEnricher, MessageSerializer } from '../interfaces';
+import { LogContext, RetryPolicy } from '../types';
 import { JsonMessageSerializer } from '../serializers';
 import { ConfigurationError } from '../errors';
+import { LoggerWrapper } from '../logging/logger-wrapper';
+import { NoOpLogger } from '../logging/no-op-logger';
 
 /**
  * Base configuration interface for publishers.
@@ -31,6 +33,11 @@ export interface PublisherConfig {
    * Retry policy for failed publish operations
    */
   retryPolicy?: RetryPolicy;
+
+  /**
+   * Logger instance for publishing operations
+   */
+  logger?: Logger;
 }
 
 /**
@@ -69,6 +76,8 @@ export abstract class PublisherConfiguration<T = any> {
   protected _enrichers: MessageEnricher[] = [];
   protected _contextResolver?: ContextResolver;
   protected _retryPolicy?: RetryPolicy;
+  protected _logger?: Logger;
+  protected _logContext?: LogContext;
 
   /**
    * Set the message serializer.
@@ -122,6 +131,53 @@ export abstract class PublisherConfiguration<T = any> {
    */
   retryPolicy(policy: RetryPolicy): this {
     this._retryPolicy = policy;
+    return this;
+  }
+
+  /**
+   * Set the logger instance.
+   * Pass your configured logger (Winston, Pino, console, NestJS Logger, etc.)
+   * The publisher will emit structured log messages that your logger formats.
+   *
+   * @param logger - The logger instance to use for publishing operations
+   * @returns This configuration instance for method chaining
+   * @example
+   * ```typescript
+   * // Using console
+   * config.logger(console)
+   *
+   * // Using Winston
+   * const winstonLogger = winston.createLogger({ ... });
+   * config.logger(winstonLogger)
+   *
+   * // Using Pino
+   * const pinoLogger = pino({ ... });
+   * config.logger(pinoLogger)
+   * ```
+   */
+  logger(logger: Logger): this {
+    this._logger = logger;
+    return this;
+  }
+
+  /**
+   * Set static context fields that appear in all log messages.
+   * These fields are merged with dynamic context provided per log statement.
+   * Dynamic context takes precedence for overlapping keys.
+   *
+   * @param context - Static context fields to include in all logs
+   * @returns This configuration instance for method chaining
+   * @example
+   * ```typescript
+   * config.logContext({
+   *   service: 'order-service',
+   *   environment: 'production',
+   *   version: '1.2.3'
+   * })
+   * ```
+   */
+  logContext(context: LogContext): this {
+    this._logContext = context;
     return this;
   }
 
@@ -184,7 +240,15 @@ export class SnsPublisherConfiguration<T = any> extends PublisherConfiguration<T
    */
   protected validate(): void {
     if (!this._destination) {
-      throw new ConfigurationError('SNS publisher destination (topic ARN or name) is required');
+      const validationErrors = ['SNS publisher destination (topic ARN or name) is required'];
+
+      // Log configuration error if logger is configured
+      if (this._logger) {
+        const logger = new LoggerWrapper(this._logger, this._logContext);
+        logger.error('Invalid publisher configuration', { validationErrors });
+      }
+
+      throw new ConfigurationError(validationErrors[0]);
     }
   }
 
@@ -203,12 +267,19 @@ export class SnsPublisherConfiguration<T = any> extends PublisherConfiguration<T
       this._serializer = new JsonMessageSerializer();
     }
 
+    // Create logger with context merging and error isolation
+    // If no logger is configured, use NoOpLogger (silent by default)
+    const logger = this._logger
+      ? new LoggerWrapper(this._logger, this._logContext)
+      : new NoOpLogger();
+
     return {
       destination: this._destination!,
       serializer: this._serializer,
       enrichers: this._enrichers,
       contextResolver: this._contextResolver,
       retryPolicy: this._retryPolicy,
+      logger,
     };
   }
 }
@@ -258,7 +329,15 @@ export class SqsPublisherConfiguration<T = any> extends PublisherConfiguration<T
    */
   protected validate(): void {
     if (!this._destination) {
-      throw new ConfigurationError('SQS publisher destination (queue URL or name) is required');
+      const validationErrors = ['SQS publisher destination (queue URL or name) is required'];
+
+      // Log configuration error if logger is configured
+      if (this._logger) {
+        const logger = new LoggerWrapper(this._logger, this._logContext);
+        logger.error('Invalid publisher configuration', { validationErrors });
+      }
+
+      throw new ConfigurationError(validationErrors[0]);
     }
   }
 
@@ -277,12 +356,19 @@ export class SqsPublisherConfiguration<T = any> extends PublisherConfiguration<T
       this._serializer = new JsonMessageSerializer();
     }
 
+    // Create logger with context merging and error isolation
+    // If no logger is configured, use NoOpLogger (silent by default)
+    const logger = this._logger
+      ? new LoggerWrapper(this._logger, this._logContext)
+      : new NoOpLogger();
+
     return {
       destination: this._destination!,
       serializer: this._serializer,
       enrichers: this._enrichers,
       contextResolver: this._contextResolver,
       retryPolicy: this._retryPolicy,
+      logger,
     };
   }
 }

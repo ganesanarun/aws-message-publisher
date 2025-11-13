@@ -1,6 +1,6 @@
 {
   "name": "@snow-tzu/aws-message-publisher",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Production-ready TypeScript package for publishing messages to AWS SNS and SQS",
   "main": "dist/index.js",
   "module": "dist/index.js",

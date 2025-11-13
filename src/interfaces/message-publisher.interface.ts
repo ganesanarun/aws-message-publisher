@@ -5,7 +5,7 @@ import { PublishResult, BatchPublishResult } from '../types';
  * Core interface for message publishers.
  * Supports publishing to AWS SNS and SQS with type-safe generics.
  */
-export interface MessagePublisher<T = any> {
+export interface MessagePublisher<T> {
   /**
    * Publish a single message to the configured destination.
    *

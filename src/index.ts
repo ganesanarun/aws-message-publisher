@@ -29,3 +29,13 @@ export * from './errors';
 
 // Pipeline
 export * from './pipeline';
+// Logging
+export { Logger } from './interfaces/logger.interface';
+export { LogContext } from './types/log-context';
+export { NoOpLogger } from './logging/no-op-logger';
+
+// Testing utilities
+export { TestLogger, LogEntry } from './testing';
+
+// Logger adapters
+export { NestLoggerAdapter } from './adapters';
