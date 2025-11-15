@@ -4,6 +4,8 @@
 
 Production-ready, framework-agnostic TypeScript package for publishing messages to AWS SNS and SQS. Works with any Node.js application including NestJS, Express, Fastify, or standalone services.
 
+![banner](./docs/images/hero.png)
+
 ## Features
 
 - 🚀 **SNS and SQS Publishers** - Publish to AWS SNS topics and SQS queues
@@ -77,11 +79,18 @@ Publish messages to AWS SNS topics with minimal configuration using simple topic
 import { SNSClient } from '@aws-sdk/client-sns';
 import { SnsMessagePublisher } from '@snow-tzu/aws-message-publisher';
 
+// Define message type
+interface OrderEvent {
+  orderId: string;
+  status: string;
+  timestamp: Date;
+}
+
 // Create SNS client
 const snsClient = new SNSClient({ region: 'us-east-1' });
 
 // Create and configure publisher with topic name
-const publisher = new SnsMessagePublisher(snsClient);
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')  // Simple topic name - will be resolved to full ARN
 );
@@ -116,11 +125,17 @@ Publish messages directly to AWS SQS queues using simple queue names:
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { SqsMessagePublisher } from '@snow-tzu/aws-message-publisher';
 
+// Define message type
+interface TaskMessage {
+  orderId: string;
+  status: string;
+}
+
 // Create SQS client
 const sqsClient = new SQSClient({ region: 'us-east-1' });
 
 // Create and configure publisher with queue name
-const publisher = new SqsMessagePublisher(sqsClient);
+const publisher = new SqsMessagePublisher<TaskMessage>(sqsClient);
 publisher.configure(config => config
   .queueName('my-queue')  // Simple queue name - will be resolved to full URL
 );
@@ -269,6 +284,13 @@ import { SnsMessagePublisher, TimestampEnricher } from '@snow-tzu/aws-message-pu
 import { AwsConfigModule } from './aws-config.module';
 import { OrderService } from './order.service';
 
+// Define message type
+interface OrderEvent {
+  orderId: string;
+  status: string;
+  timestamp: Date;
+}
+
 @Module({
   imports: [AwsConfigModule],
   providers: [
@@ -276,7 +298,7 @@ import { OrderService } from './order.service';
     {
       provide: 'ORDER_PUBLISHER',
       useFactory: (snsClient: SNSClient) => {
-        const publisher = new SnsMessagePublisher(snsClient);
+        const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
         publisher.configure(config => config
           .topicName(process.env.ORDER_TOPIC_NAME)  // Use simple topic name
           .addEnricher(new TimestampEnricher())
@@ -298,6 +320,7 @@ export class OrderModule {}
 import { Injectable, Inject } from '@nestjs/common';
 import { MessagePublisher } from '@snow-tzu/aws-message-publisher';
 
+// Define message type (should match the interface in order.module.ts)
 interface OrderEvent {
   orderId: string;
   status: string;
@@ -336,11 +359,18 @@ import { SnsMessagePublisher, TimestampEnricher } from '@snow-tzu/aws-message-pu
 const app = express();
 app.use(express.json());
 
+// Define message type
+interface OrderEvent {
+  orderId: string;
+  status: string;
+  timestamp: Date;
+}
+
 // Create SNS client
 const snsClient = new SNSClient({ region: 'us-east-1' });
 
 // Create and configure publisher with topic name
-const orderPublisher = new SnsMessagePublisher(snsClient);
+const orderPublisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 orderPublisher.configure(config => config
   .topicName(process.env.ORDER_TOPIC_NAME)  // Use simple topic name
   .addEnricher(new TimestampEnricher())
@@ -385,16 +415,29 @@ import { SNSClient } from '@aws-sdk/client-sns';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { SnsMessagePublisher, SqsMessagePublisher, TimestampEnricher } from '@snow-tzu/aws-message-publisher';
 
+// Define message types
+interface OrderEvent {
+  orderId: string;
+  status: string;
+  timestamp?: Date;
+}
+
+interface NotificationMessage {
+  userId: string;
+  message: string;
+  type: string;
+}
+
 const snsClient = new SNSClient({ region: 'us-east-1' });
 const sqsClient = new SQSClient({ region: 'us-east-1' });
 
-export const orderPublisher = new SnsMessagePublisher(snsClient);
+export const orderPublisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 orderPublisher.configure(config => config
   .topicName(process.env.ORDER_TOPIC_NAME)  // Use simple topic name
   .addEnricher(new TimestampEnricher())
 );
 
-export const notificationPublisher = new SqsMessagePublisher(sqsClient);
+export const notificationPublisher = new SqsMessagePublisher<NotificationMessage>(sqsClient);
 notificationPublisher.configure(config => config
   .queueName(process.env.NOTIFICATION_QUEUE_NAME)  // Use simple queue name
   .addEnricher(new TimestampEnricher())
@@ -424,7 +467,12 @@ Adds a timestamp to every published message:
 ```typescript
 import { SnsMessagePublisher, TimestampEnricher } from '@snow-tzu/aws-message-publisher';
 
-const publisher = new SnsMessagePublisher(snsClient);
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')  // Use simple topic name
   .addEnricher(new TimestampEnricher())
@@ -486,6 +534,12 @@ class TraceEnricher implements MessageEnricher {
 }
 
 // Use it
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')
   .addEnricher(new TraceEnricher())
@@ -570,6 +624,12 @@ class UserContextEnricher implements MessageEnricher {
 ##### Adding Multiple Enrichers
 
 ```typescript
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')
   .addEnricher(new TraceEnricher())
@@ -595,7 +655,13 @@ publisher.configure(config => config
 Enrichers execute in priority order (lower numbers first). If enrichers have the same priority, they execute in the order they were added.
 
 ```typescript
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
 // Execution order: TraceEnricher (10) → CorrelationEnricher (20) → TimestampEnricher (30)
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')
   .addEnricher(new TimestampEnricher())      // Priority: 30
@@ -649,7 +715,12 @@ The simplest way to enable logging is to pass the built-in console object:
 ```typescript
 import { SnsMessagePublisher } from '@snow-tzu/aws-message-publisher';
 
-const publisher = new SnsMessagePublisher(snsClient);
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')
   .logger(console)
@@ -683,6 +754,12 @@ Check out [examples](./examples)
 Add static context fields that appear in all log messages:
 
 ```typescript
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')
   .logger(console)
@@ -716,6 +793,11 @@ The logger interface is compatible with most popular logging frameworks:
 If your logging framework has different method signatures, create a simple adapter:
 
 ```typescript
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
 // Example: Logger with different method signatures
 const customLogger = {
   debug: (msg: string, context?: any) => myLogger.logDebug(msg, context),
@@ -724,6 +806,7 @@ const customLogger = {
   error: (msg: string, context?: any) => myLogger.logError(msg, context)
 };
 
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config.logger(customLogger));
 ```
 
@@ -732,11 +815,16 @@ publisher.configure(config => config.logger(customLogger));
 If no logger is configured, the publisher operates silently with zero overhead:
 
 ```typescript
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
 // No logger configured - no logs emitted
-const publisher = new SnsMessagePublisher(snsClient);
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config.topicName('my-topic'));
 
-await publisher.publish({ orderId: '123' });
+await publisher.publish({ orderId: '123', status: 'created' });
 // No output - silent operation
 ```
 
@@ -787,6 +875,12 @@ class XmlMessageSerializer implements MessageSerializer {
 }
 
 // Use custom serializer
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')
   .serializer(new XmlMessageSerializer())
@@ -817,6 +911,18 @@ class CsvMessageSerializer implements MessageSerializer {
     return 'text/csv';
   }
 }
+
+// Use CSV serializer
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
+publisher.configure(config => config
+  .topicName('my-topic')
+  .serializer(new CsvMessageSerializer())
+);
 ```
 
 ##### Example: Protobuf Serializer
@@ -857,8 +963,13 @@ publisher.configure(config => config
 #### Using Custom Serializers
 
 ```typescript
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
 // Configure with custom serializer
-const publisher = new SnsMessagePublisher(snsClient);
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('my-topic')
   .serializer(new XmlMessageSerializer())
@@ -1540,7 +1651,7 @@ interface OrderEvent {
   metadata?: Record<string, any>;
 }
 
-// Use generic type
+// Use generic type parameter
 const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config.topicName('orders'));
 
@@ -1565,7 +1676,16 @@ await publisher.publish({
 **Solution:** Handle partial failures:
 
 ```typescript
-const messages = [/* ... */];
+interface OrderEvent {
+  orderId: string;
+  status: string;
+  timestamp: Date;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
+publisher.configure(config => config.topicName('orders'));
+
+const messages: OrderEvent[] = [/* ... */];
 const result = await publisher.publishBatch(messages);
 
 console.log(`Success: ${result.successCount}/${result.totalCount}`);
@@ -1612,6 +1732,14 @@ if (result.failed.length > 0) {
 
 2. **Use S3 for large payloads:**
    ```typescript
+   interface OrderEvent {
+     orderId: string;
+     dataLocation: string;
+   }
+   
+   const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
+   publisher.configure(config => config.topicName('orders'));
+   
    // Store large data in S3
    const s3Key = await uploadToS3(largeData);
    
@@ -1631,6 +1759,14 @@ if (result.failed.length > 0) {
 **Solution:**
 
 ```typescript
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SqsMessagePublisher<OrderEvent>(sqsClient);
+publisher.configure(config => config.queueName('orders.fifo'));
+
 // Option 1: Provide deduplication ID
 await publisher.publish(
   { orderId: '123', status: 'created' },
@@ -1692,7 +1828,16 @@ const snsClient = new SNSClient({
 
 **Application Logging:**
 ```typescript
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
+publisher.configure(config => config.topicName('orders'));
+
 // Log publish results
+const message: OrderEvent = { orderId: '123', status: 'created' };
 const result = await publisher.publish(message);
 console.log('Published:', {
   messageId: result.messageId,
@@ -1701,6 +1846,7 @@ console.log('Published:', {
 });
 
 // Log batch results
+const messages: OrderEvent[] = [/* ... */];
 const batchResult = await publisher.publishBatch(messages);
 console.log('Batch publish:', {
   total: batchResult.totalCount,
@@ -1719,6 +1865,16 @@ console.log('Batch publish:', {
 
 1. **Use batch publishing:**
    ```typescript
+   interface OrderEvent {
+     orderId: string;
+     status: string;
+   }
+   
+   const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
+   publisher.configure(config => config.topicName('orders'));
+   
+   const messages: OrderEvent[] = [/* ... */];
+   
    // ❌ Slow - sequential publishes
    for (const message of messages) {
      await publisher.publish(message);
@@ -1817,8 +1973,14 @@ This package is designed to work seamlessly with [@snow-tzu/nest-sqs-listener](h
 **Example: Publisher → Listener Flow**
 
 ```typescript
+// Define message interface
+interface OrderEvent {
+  orderId: string;
+  status: string;
+}
+
 // Publisher (this package)
-const publisher = new SnsMessagePublisher(snsClient);
+const publisher = new SnsMessagePublisher<OrderEvent>(snsClient);
 publisher.configure(config => config
   .topicName('order-events')  // Use simple topic name
   .addEnricher(new TimestampEnricher())
